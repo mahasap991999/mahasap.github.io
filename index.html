@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>💰 My Money Manager</title>
+  <meta name="theme-color" content="#4361ee" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #4361ee;
+      --income: #06d6a0;
+      --expense: #ef476f;
+      --bg: #f8f9fa;
+      --card: white;
+      --text: #333;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: 70px;
+    }
+    header {
+      background: var(--primary);
+      color: white;
+      text-align: center;
+      padding: 18px 16px;
+      font-size: 1.3rem;
+      font-weight: 600;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .tabs {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      background: white;
+      border-top: 1px solid #eee;
+      z-index: 100;
+    }
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 10px 0;
+      font-size: 0.8rem;
+      color: #666;
+      cursor: pointer;
+    }
+    .tab.active {
+      color: var(--primary);
+      font-weight: bold;
+    }
+    .tab i { display: block; font-size: 1.4rem; margin-bottom: 4px; }
+
+    .screen { display: none; padding: 20px; }
+    .screen.active { display: block; }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 14px 0;
+      font-size: 1.15rem;
+    }
+    .income { color: var(--income); font-weight: bold; }
+    .expense { color: var(--expense); font-weight: bold; }
+    .balance { 
+      font-size: 1.6rem; 
+      font-weight: bold; 
+      text-align: center; 
+      margin: 20px 0;
+      color: var(--primary);
+    }
+
+    .list-item {
+      padding: 14px 0;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .list-item:last-child { border: none; }
+    .item-main { flex: 1; }
+    .item-actions { display: flex; gap: 12px; }
+    .btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .btn-edit { background: #4cc9f0; color: white; }
+    .btn-delete { background: var(--danger); color: white; }
+
+    .form-group { margin: 18px 0; }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      font-size: 1rem;
+    }
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      width: 100%;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #6c757d;
+    }
+    .status {
+      text-align: center;
+      margin: 16px 0;
+      color: var(--income);
+      font-weight: bold;
+    }
+    h3 {
+      margin-bottom: 20px;
+      font-size: 1.4rem;
+      color: var(--primary);
+    }
+    #chartContainer {
+      height: 250px;
+      margin: 20px 0;
+    }
+    .period-toggle {
+      display: flex;
+      background: #f0f0f0;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .period-btn {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      background: white;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .period-btn.active {
+      background: var(--primary);
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <header>💰 My Money Manager</header>
+
+  <!-- DASHBOARD -->
+  <div id="home" class="screen active">
+    <div class="card">
+      <div class="period-toggle">
+        <button class="period-btn active" onclick="setPeriod('daily')">Today</button>
+        <button class="period-btn" onclick="setPeriod('monthly')">This Month</button>
+        <button class="period-btn" onclick="setPeriod('yearly')">This Year</button>
+      </div>
+      
+      <div class="summary-row">
+        <span>Income</span>
+        <span class="income" id="totalIncome">$0.00</span>
+      </div>
+      <div class="summary-row">
+        <span>Expenses</span>
+        <span class="expense" id="totalExpense">$0.00</span>
+      </div>
+      <div class="balance" id="balance">$0.00</div>
+    </div>
+
+    <div class="card">
+      <h3>Spending by Category</h3>
+      <canvas id="spendingChart"></canvas>
+    </div>
+  </div>
+
+  <!-- TRANSACTIONS -->
+  <div id="transactions" class="screen">
+    <div class="card">
+      <h3>Transactions</h3>
+      <button onclick="showScreen('add-transaction')">➕ Add Transaction</button>
+      <div id="transactionList"></div>
+    </div>
+  </div>
+
+  <!-- CATEGORIES -->
+  <div id="categories" class="screen">
+    <div class="card">
+      <h3>Categories</h3>
+      <button onclick="showScreen('add-category')">➕ Add Category</button>
+      <div id="categoryList"></div>
+    </div>
+  </div>
+
+  <!-- ACCOUNTS -->
+  <div id="accounts" class="screen">
+    <div class="card">
+      <h3>Accounts</h3>
+      <button onclick="showScreen('add-account')">➕ Add Account</button>
+      <div id="accountList"></div>
+    </div>
+  </div>
+
+  <!-- ADD TRANSACTION FORM -->
+  <div id="add-transaction" class="screen">
+    <div class="card">
+      <h3 id="transFormTitle">Add Transaction</h3>
+      <input type="hidden" id="transId">
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="transDate">
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="transType" onchange="updateCategoryDropdown()">
+          <option value="Expense">Expense</option>
+          <option value="Income">Income</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Account</label>
+        <select id="transAccount"></select>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="transCategory"></select>
+      </div>
+      <div class="form-group">
+        <label>Amount</label>
+        <input type="number" id="transAmount" step="0.01" min="0.01" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="transDesc" rows="2" placeholder="Optional note"></textarea>
+      </div>
+      <button onclick="saveTransaction()">✅ Save</button>
+      <button class="secondary" onclick="showScreen('transactions')">⬅️ Cancel</button>
+      <div class="status" id="transStatus"></div>
+    </div>
+  </div>
+
+  <!-- ADD CATEGORY FORM -->
+  <div id="add-category" class="screen">
+    <div class="card">
+      <h3 id="catFormTitle">Add Category</h3>
+      <input type="hidden" id="catId">
+      <div class="form-group">
+        <label>Type</label>
+        <select id="catType">
+          <option value="Expense">Expense</option>
+          <option value="Income">Income</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="catName" placeholder="e.g., Groceries, Salary">
+      </div>
+      <button onclick="saveCategory()">✅ Save</button>
+      <button class="secondary" onclick="showScreen('categories')">⬅️ Cancel</button>
+      <div class="status" id="catStatus"></div>
+    </div>
+  </div>
+
+  <!-- ADD ACCOUNT FORM -->
+  <div id="add-account" class="screen">
+    <div class="card">
+      <h3 id="accFormTitle">Add Account</h3>
+      <input type="hidden" id="accId">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="accName" placeholder="e.g., Cash, Bank Account">
+      </div>
+      <button onclick="saveAccount()">✅ Save</button>
+      <button class="secondary" onclick="showScreen('accounts')">⬅️ Cancel</button>
+      <div class="status" id="accStatus"></div>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAV (4 TABS) -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('home')">
+      <i class="material-icons">home</i>
+      <span>Home</span>
+    </div>
+    <div class="tab" onclick="switchTab('transactions')">
+      <i class="material-icons">receipt</i>
+      <span>Transactions</span>
+    </div>
+    <div class="tab" onclick="switchTab('categories')">
+      <i class="material-icons">category</i>
+      <span>Categories</span>
+    </div>
+    <div class="tab" onclick="switchTab('accounts')">
+      <i class="material-icons">account_balance</i>
+      <span>Accounts</span>
+    </div>
+  </div>
+
+  <script>
+    // 🔑 CONFIG — REPLACE WITH YOUR INFO
+    const CONFIG = {
+      SHEET_ID: "19q4NDXNayjoryL8Sa0PQcoRFzIxRHAi-yOYjDdvf5Ng",
+      API_KEY: "AIzaSyCgxD4CkGpUhTZbYttgE8w7jCibgrGndNo" // ← PASTE YOUR KEY HERE
+    };
+
+    let transactions = [];
+    let categories = [];
+    let accounts = [];
+    let currentPeriod = 'daily';
+    let spendingChart = null;
+
+    // Initialize
+    loadAllData();
+
+    async function loadAllData() {
+      await loadTransactions();
+      await loadCategories();
+      await loadAccounts();
+      renderAll();
+      updateDashboard();
+    }
+
+    async function loadTransactions() {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Transactions!A1:F1000?key=${CONFIG.API_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.values && data.values.length > 1) {
+        const headers = data.values[0];
+        transactions = data.values.slice(1).map(row => {
+          const obj = {};
+          headers.forEach((h, i) => obj[h] = row[i] || '');
+          return obj;
+        });
+      }
+    }
+
+    async function loadCategories() {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Categories!A1:B100?key=${CONFIG.API_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.values && data.values.length > 1) {
+        const headers = data.values[0];
+        categories = data.values.slice(1).map(row => {
+          const obj = {};
+          headers.forEach((h, i) => obj[h] = row[i] || '');
+          return obj;
+        });
+      }
+    }
+
+    async function loadAccounts() {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Accounts!A1:A100?key=${CONFIG.API_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.values && data.values.length > 1) {
+        accounts = data.values.slice(1).map(row => row[0] || '').filter(name => name);
+      }
+    }
+
+    function renderAll() {
+      renderTransactionList();
+      renderCategoryList();
+      renderAccountList();
+      updateDropdowns();
+    }
+
+    function updateDropdowns() {
+      updateCategoryDropdown();
+      updateAccountDropdown();
+    }
+
+    function updateCategoryDropdown() {
+      const type = document.getElementById('transType')?.value || 'Expense';
+      const sel = document.getElementById('transCategory');
+      if (!sel) return;
+      
+      sel.innerHTML = '';
+      categories
+        .filter(c => c.Type === type)
+        .forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.Name;
+          opt.textContent = c.Name;
+          sel.appendChild(opt);
+        });
+    }
+
+    function updateAccountDropdown() {
+      const sel = document.getElementById('transAccount');
+      if (!sel) return;
+      
+      sel.innerHTML = '';
+      accounts.forEach(acc => {
+        const opt = document.createElement('option');
+        opt.value = acc;
+        opt.textContent = acc;
+        sel.appendChild(opt);
+      });
+    }
+
+    // =============== DASHBOARD ===============
+    function setPeriod(period) {
+      currentPeriod = period;
+      document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      updateDashboard();
+    }
+
+    function updateDashboard() {
+      const now = new Date();
+      let filtered = transactions;
+
+      if (currentPeriod === 'daily') {
+        const today = now.toISOString().split('T')[0];
+        filtered = transactions.filter(t => t.Date === today);
+      } else if (currentPeriod === 'monthly') {
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        filtered = transactions.filter(t => {
+          const d = new Date(t.Date);
+          return d.getFullYear() === year && String(d.getMonth() + 1).padStart(2, '0') === month;
+        });
+      } else if (currentPeriod === 'yearly') {
+        const year = now.getFullYear();
+        filtered = transactions.filter(t => new Date(t.Date).getFullYear() == year);
+      }
+
+      const income = filtered
+        .filter(t => t.Type === 'Income')
+        .reduce((sum, t) => sum + parseFloat(t.Amount || 0), 0);
+      const expense = filtered
+        .filter(t => t.Type === 'Expense')
+        .reduce((sum, t) => sum + parseFloat(t.Amount || 0), 0);
+
+      document.getElementById('totalIncome').textContent = '$' + income.toFixed(2);
+      document.getElementById('totalExpense').textContent = '$' + expense.toFixed(2);
+      document.getElementById('balance').textContent = '$' + (income - expense).toFixed(2);
+
+      // Chart
+      const spending = {};
+      filtered
+        .filter(t => t.Type === 'Expense')
+        .forEach(t => {
+          const cat = t.Category;
+          spending[cat] = (spending[cat] || 0) + parseFloat(t.Amount);
+        });
+
+      renderChart(spending);
+    }
+
+    function renderChart(data) {
+      const ctx = document.getElementById('spendingChart').getContext('2d');
+      if (spendingChart) spendingChart.destroy();
+
+      if (Object.keys(data).length === 0) {
+        document.getElementById('spendingChart').parentElement.innerHTML = '<p>No spending data</p>';
+        return;
+      }
+
+      const labels = Object.keys(data);
+      const values = Object.values(data);
+
+      spendingChart = new Chart(ctx, {
+        type: 'doughnut',
+         {
+          labels: labels,
+          datasets: [{
+             values,
+            backgroundColor: [
+              '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF6384', '#36A2EB'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
+        }
+      });
+    }
+
+    // =============== TRANSACTIONS ===============
+    function renderTransactionList() {
+      const container = document.getElementById('transactionList');
+      if (transactions.length === 0) {
+        container.innerHTML = '<p>No transactions yet.</p>';
+        return;
+      }
+      let html = '';
+      transactions.forEach((t, index) => {
+        const date = t.Date || '—';
+        const amount = parseFloat(t.Amount || 0).toFixed(2);
+        html += `
+          <div class="list-item">
+            <div class="item-main">
+              <div><strong>${t.Type}</strong>: $${amount}</div>
+              <div>${t.Account || '—'} • ${t.Category || '—'} • ${date} ${t.Description ? '• ' + t.Description : ''}</div>
+            </div>
+            <div class="item-actions">
+              <div class="btn btn-edit" onclick="editTransaction(${index})">✏️</div>
+              <div class="btn btn-delete" onclick="deleteTransaction(${index})">🗑️</div>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function editTransaction(index) {
+      const t = transactions[index];
+      document.getElementById('transId').value = index;
+      document.getElementById('transFormTitle').textContent = 'Edit Transaction';
+      document.getElementById('transDate').value = t.Date;
+      document.getElementById('transType').value = t.Type;
+      document.getElementById('transAmount').value = t.Amount;
+      document.getElementById('transDesc').value = t.Description || '';
+      
+      updateDropdowns();
+      
+      // Set account
+      const accSel = document.getElementById('transAccount');
+      for (let opt of accSel.options) {
+        if (opt.value === t.Account) opt.selected = true;
+      }
+      // Set category
+      const catSel = document.getElementById('transCategory');
+      for (let opt of catSel.options) {
+        if (opt.value === t.Category) opt.selected = true;
+      }
+      
+      showScreen('add-transaction');
+    }
+
+    async function deleteTransaction(index) {
+      if (!confirm('Delete this transaction?')) return;
+      transactions.splice(index, 1);
+      await rebuildSheet('Transactions', ['Date','Type','Account','Category','Amount','Description'], transactions);
+      renderTransactionList();
+      updateDashboard();
+    }
+
+    // =============== CATEGORIES ===============
+    function renderCategoryList() {
+      const container = document.getElementById('categoryList');
+      if (categories.length === 0) {
+        container.innerHTML = '<p>No categories yet.</p>';
+        return;
+      }
+      let html = '';
+      categories.forEach((c, index) => {
+        html += `
+          <div class="list-item">
+            <div class="item-main">
+              <div><strong>${c.Type}</strong>: ${c.Name}</div>
+            </div>
+            <div class="item-actions">
+              <div class="btn btn-edit" onclick="editCategory(${index})">✏️</div>
+              <div class="btn btn-delete" onclick="deleteCategory(${index})">🗑️</div>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function editCategory(index) {
+      const c = categories[index];
+      document.getElementById('catId').value = index;
+      document.getElementById('catFormTitle').textContent = 'Edit Category';
+      document.getElementById('catType').value = c.Type;
+      document.getElementById('catName').value = c.Name;
+      showScreen('add-category');
+    }
+
+    async function deleteCategory(index) {
+      if (!confirm('Delete this category? Transactions will lose category.')) return;
+      categories.splice(index, 1);
+      await rebuildSheet('Categories', ['Type','Name'], categories);
+      renderCategoryList();
+      updateDropdowns();
+    }
+
+    // =============== ACCOUNTS ===============
+    function renderAccountList() {
+      const container = document.getElementById('accountList');
+      if (accounts.length === 0) {
+        container.innerHTML = '<p>No accounts yet.</p>';
+        return;
+      }
+      let html = '';
+      accounts.forEach((acc, index) => {
+        html += `
+          <div class="list-item">
+            <div class="item-main">
+              <div>${acc}</div>
+            </div>
+            <div class="item-actions">
+              <div class="btn btn-edit" onclick="editAccount(${index})">✏️</div>
+              <div class="btn btn-delete" onclick="deleteAccount(${index})">🗑️</div>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function editAccount(index) {
+      document.getElementById('accId').value = index;
+      document.getElementById('accFormTitle').textContent = 'Edit Account';
+      document.getElementById('accName').value = accounts[index];
+      showScreen('add-account');
+    }
+
+    async function deleteAccount(index) {
+      if (!confirm('Delete this account?')) return;
+      accounts.splice(index, 1);
+      await rebuildSheet('Accounts', ['Name'], accounts.map(name => ({ Name: name })));
+      renderAccountList();
+      updateDropdowns();
+    }
+
+    // =============== SAVE FUNCTIONS ===============
+    async function saveTransaction() {
+      const data = {
+        Date: document.getElementById('transDate').value,
+        Type: document.getElementById('transType').value,
+        Account: document.getElementById('transAccount').value,
+        Category: document.getElementById('transCategory').value,
+        Amount: document.getElementById('transAmount').value,
+        Description: document.getElementById('transDesc').value
+      };
+
+      if (!data.Date || !data.Amount || parseFloat(data.Amount) <= 0) {
+        alert('Please enter valid date and amount.');
+        return;
+      }
+
+      const index = document.getElementById('transId').value;
+      if (index !== '') {
+        transactions[index] = data;
+      } else {
+        transactions.push(data);
+      }
+
+      await rebuildSheet('Transactions', ['Date','Type','Account','Category','Amount','Description'], transactions);
+      
+      showScreen('transactions');
+      renderTransactionList();
+      updateDashboard();
+      document.getElementById('transStatus').textContent = '✅ Saved!';
+      setTimeout(() => document.getElementById('transStatus').textContent = '', 2000);
+    }
+
+    async function saveCategory() {
+      const name = document.getElementById('catName').value.trim();
+      if (!name) { alert('Name required'); return; }
+      
+      const data = {
+        Type: document.getElementById('catType').value,
+        Name: name
+      };
+
+      const index = document.getElementById('catId').value;
+      if (index !== '') {
+        categories[index] = data;
+      } else {
+        categories.push(data);
+      }
+
+      await rebuildSheet('Categories', ['Type','Name'], categories);
+      
+      showScreen('categories');
+      renderCategoryList();
+      updateDropdowns();
+      document.getElementById('catStatus').textContent = '✅ Saved!';
+      setTimeout(() => document.getElementById('catStatus').textContent = '', 2000);
+    }
+
+    async function saveAccount() {
+      const name = document.getElementById('accName').value.trim();
+      if (!name) { alert('Name required'); return; }
+      
+      const index = document.getElementById('accId').value;
+      if (index !== '') {
+        accounts[index] = name;
+      } else {
+        accounts.push(name);
+      }
+
+      await rebuildSheet('Accounts', ['Name'], accounts.map(acc => ({ Name: acc })));
+      
+      showScreen('accounts');
+      renderAccountList();
+      updateDropdowns();
+      document.getElementById('accStatus').textContent = '✅ Saved!';
+      setTimeout(() => document.getElementById('accStatus').textContent = '', 2000);
+    }
+
+    // Rebuild entire sheet (simple for small datasets)
+    async function rebuildSheet(sheetName, headers, dataRows) {
+      const values = [headers, ...dataRows.map(r => headers.map(h => r[h] || ''))];
+      // Clear sheet
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${sheetName}!A1:ZZ1000:clear?key=${CONFIG.API_KEY}`, {
+        method: 'POST'
+      });
+      // Write new data
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${sheetName}!A1:append?valueInputOption=USER_ENTERED&key=${CONFIG.API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      });
+    }
+
+    // =============== NAVIGATION ===============
+    function showScreen(id) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function switchTab(tabId) {
+      showScreen(tabId);
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+      if (tabId === 'home') updateDashboard();
+    }
+
+    // Set today
+    document.getElementById('transDate').value = new Date().toISOString().substring(0, 10);
+  </script>
+</body>
+</html>
