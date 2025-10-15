@@ -302,7 +302,7 @@
     </div>
   </div>
 
-  <!-- BOTTOM NAV (4 TABS) -->
+  <!-- BOTTOM NAV -->
   <div class="tabs">
     <div class="tab active" onclick="switchTab('home')">
       <i class="material-icons">home</i>
@@ -323,10 +323,11 @@
   </div>
 
   <script>
-    // 🔑 CONFIG — REPLACE WITH YOUR INFO
+    // 🔑 CONFIG — REPLACE WITH YOUR SHEETDB API ENDPOINTS
     const CONFIG = {
-      SHEET_ID: "19q4NDXNayjoryL8Sa0PQcoRFzIxRHAi-yOYjDdvf5Ng",
-      API_KEY: "AIzaSyCgxD4CkGpUhTZbYttgE8w7jCibgrGndNo" // ← PASTE YOUR KEY HERE
+      TRANSACTIONS_API: "https://sheetdb.io/api/v1/https://sheetdb.io/api/v1/svgh82m1gzt3p",
+      CATEGORIES_API: "https://sheetdb.io/api/v1/YOUR_CATEGORIES_API_KEY",
+      ACCOUNTS_API: "https://sheetdb.io/api/v1/YOUR_ACCOUNTS_API_KEY"
     };
 
     let transactions = [];
@@ -347,39 +348,32 @@
     }
 
     async function loadTransactions() {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Transactions!A1:F1000?key=${CONFIG.API_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.values && data.values.length > 1) {
-        const headers = data.values[0];
-        transactions = data.values.slice(1).map(row => {
-          const obj = {};
-          headers.forEach((h, i) => obj[h] = row[i] || '');
-          return obj;
-        });
+      try {
+        const res = await fetch(CONFIG.TRANSACTIONS_API);
+        const data = await res.json();
+        transactions = data;
+      } catch (e) {
+        console.error("Error loading transactions:", e);
       }
     }
 
     async function loadCategories() {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Categories!A1:B100?key=${CONFIG.API_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.values && data.values.length > 1) {
-        const headers = data.values[0];
-        categories = data.values.slice(1).map(row => {
-          const obj = {};
-          headers.forEach((h, i) => obj[h] = row[i] || '');
-          return obj;
-        });
+      try {
+        const res = await fetch(CONFIG.CATEGORIES_API);
+        const data = await res.json();
+        categories = data;
+      } catch (e) {
+        console.error("Error loading categories:", e);
       }
     }
 
     async function loadAccounts() {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/Accounts!A1:A100?key=${CONFIG.API_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.values && data.values.length > 1) {
-        accounts = data.values.slice(1).map(row => row[0] || '').filter(name => name);
+      try {
+        const res = await fetch(CONFIG.ACCOUNTS_API);
+        const data = await res.json();
+        accounts = data.map(row => row.Name).filter(name => name);
+      } catch (e) {
+        console.error("Error loading accounts:", e);
       }
     }
 
@@ -561,8 +555,11 @@
 
     async function deleteTransaction(index) {
       if (!confirm('Delete this transaction?')) return;
-      transactions.splice(index, 1);
-      await rebuildSheet('Transactions', ['Date','Type','Account','Category','Amount','Description'], transactions);
+      const id = transactions[index].id;
+      await fetch(`${CONFIG.TRANSACTIONS_API}/${id}`, {
+        method: 'DELETE'
+      });
+      await loadTransactions();
       renderTransactionList();
       updateDashboard();
     }
@@ -602,8 +599,11 @@
 
     async function deleteCategory(index) {
       if (!confirm('Delete this category? Transactions will lose category.')) return;
-      categories.splice(index, 1);
-      await rebuildSheet('Categories', ['Type','Name'], categories);
+      const id = categories[index].id;
+      await fetch(`${CONFIG.CATEGORIES_API}/${id}`, {
+        method: 'DELETE'
+      });
+      await loadCategories();
       renderCategoryList();
       updateDropdowns();
     }
@@ -641,8 +641,9 @@
 
     async function deleteAccount(index) {
       if (!confirm('Delete this account?')) return;
+      // In SheetDB, accounts are stored in a single column, so we'll rebuild the list
       accounts.splice(index, 1);
-      await rebuildSheet('Accounts', ['Name'], accounts.map(name => ({ Name: name })));
+      await rebuildAccounts();
       renderAccountList();
       updateDropdowns();
     }
@@ -665,13 +666,23 @@
 
       const index = document.getElementById('transId').value;
       if (index !== '') {
-        transactions[index] = data;
+        // Update
+        const id = transactions[index].id;
+        await fetch(`${CONFIG.TRANSACTIONS_API}/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        transactions.push(data);
+        // Create
+        await fetch(CONFIG.TRANSACTIONS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       }
 
-      await rebuildSheet('Transactions', ['Date','Type','Account','Category','Amount','Description'], transactions);
-      
+      await loadTransactions();
       showScreen('transactions');
       renderTransactionList();
       updateDashboard();
@@ -690,13 +701,23 @@
 
       const index = document.getElementById('catId').value;
       if (index !== '') {
-        categories[index] = data;
+        // Update
+        const id = categories[index].id;
+        await fetch(`${CONFIG.CATEGORIES_API}/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        categories.push(data);
+        // Create
+        await fetch(CONFIG.CATEGORIES_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       }
 
-      await rebuildSheet('Categories', ['Type','Name'], categories);
-      
+      await loadCategories();
       showScreen('categories');
       renderCategoryList();
       updateDropdowns();
@@ -710,12 +731,14 @@
       
       const index = document.getElementById('accId').value;
       if (index !== '') {
+        // Update (rebuild)
         accounts[index] = name;
       } else {
+        // Create
         accounts.push(name);
       }
 
-      await rebuildSheet('Accounts', ['Name'], accounts.map(acc => ({ Name: acc })));
+      await rebuildAccounts();
       
       showScreen('accounts');
       renderAccountList();
@@ -724,19 +747,19 @@
       setTimeout(() => document.getElementById('accStatus').textContent = '', 2000);
     }
 
-    // Rebuild entire sheet (simple for small datasets)
-    async function rebuildSheet(sheetName, headers, dataRows) {
-      const values = [headers, ...dataRows.map(r => headers.map(h => r[h] || ''))];
-      // Clear sheet
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${sheetName}!A1:ZZ1000:clear?key=${CONFIG.API_KEY}`, {
-        method: 'POST'
+    async function rebuildAccounts() {
+      // Delete all accounts
+      await fetch(CONFIG.ACCOUNTS_API, {
+        method: 'DELETE'
       });
-      // Write new data
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${sheetName}!A1:append?valueInputOption=USER_ENTERED&key=${CONFIG.API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values })
-      });
+      // Re-add them
+      for (const acc of accounts) {
+        await fetch(CONFIG.ACCOUNTS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ Name: acc })
+        });
+      }
     }
 
     // =============== NAVIGATION ===============
