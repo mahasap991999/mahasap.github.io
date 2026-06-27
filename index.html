@@ -183,6 +183,7 @@ const App = {
       const res = await this.run('login', u, p);
       if (res.success) {
         this.state.currentUser = res.user;
+        localStorage.setItem('mahasap_session', JSON.stringify(res.user));
         document.getElementById('login-screen').classList.add('hidden');
         this.fetchData();
       } else {
@@ -197,7 +198,7 @@ const App = {
     }
   },
   logout() {
-    // Since login screen is gone, make logout button simply refresh the web application
+    localStorage.removeItem('mahasap_session');
     window.location.reload();
   },
   isAdmin() { return this.state.currentUser?.role === 'admin'; },
@@ -1469,7 +1470,7 @@ const OfflineUI = {
     this._bar = bar;
     this.update();
 
-    window.addEventListener('online',  () => { this.update(); PWASync.syncAll(); });
+    window.addEventListener('online',  () => { this.update(); PWASync.syncAll(true); });
     window.addEventListener('offline', () => this.update());
   },
   update() {
@@ -1505,10 +1506,10 @@ const OfflineUI = {
 // ── Sync engine ──────────────────────────────────────────────
 const PWASync = {
   _syncing: false,
-  async syncAll() {
-    if (this._syncing || !navigator.onLine) return;
+  async syncAll(refreshAfter = true) {
+    if (this._syncing || !navigator.onLine) return 0;
     const queue = OfflineQueue.get();
-    if (!queue.length) return;
+    if (!queue.length) return 0;
 
     this._syncing = true;
     OfflineUI.update();
@@ -1519,19 +1520,24 @@ const PWASync = {
         await App._callGAS(item.fn, item.args);
         OfflineQueue.remove(item.id);
         synced++;
+        console.log('[PWA Sync] Synced:', item.fn);
       } catch(e) {
         console.warn('[PWA Sync] Failed:', item.fn, e.message);
-        break; // stop on first failure, retry later
+        break;
       }
     }
 
     this._syncing = false;
+    OfflineUI.update();
+
     if (synced > 0) {
       OfflineUI.showSuccess(synced);
-      // Refresh data from server after sync
-      try { await App.fetchData(); App.render(); } catch(e) {}
+      // Only refresh UI if caller wants it (not during page load — page load handles its own fetch)
+      if (refreshAfter && App.state.currentUser) {
+        try { await App.fetchData(); App.render(); } catch(e) {}
+      }
     }
-    OfflineUI.update();
+    return synced;
   }
 };
 
@@ -5698,13 +5704,34 @@ window._editSale = function(billNo) {
 };
 
 /* ─── INIT ─── For showing Login page (uncomment below and comment out App.fetchData() above to use login screen instead):*/
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  OfflineUI.init();
+
+  // ── Restore saved session (survives page refresh) ──
+  const savedUser = localStorage.getItem('mahasap_session');
+  if (savedUser) {
+    try {
+      App.state.currentUser = JSON.parse(savedUser);
+      document.getElementById('app-loading').classList.remove('hidden');
+      document.getElementById('login-screen').classList.add('hidden');
+
+      // ── SYNC FIRST before loading fresh data ──
+      if (navigator.onLine && OfflineQueue.count() > 0) {
+        console.log('[PWA] Syncing', OfflineQueue.count(), 'queued items before data load...');
+        await PWASync.syncAll();
+      }
+
+      // ── Then load fresh data ──
+      await App.fetchData();
+      return;
+    } catch(e) {
+      localStorage.removeItem('mahasap_session');
+    }
+  }
+
+  // No session — show login
   document.getElementById('app-loading').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
-  // Init offline UI bar
-  OfflineUI.init();
-  // Try to sync any pending queue on load
-  if (navigator.onLine) PWASync.syncAll();
 });
 
 // ─── PWA: Register Service Worker ────────────────────────────
@@ -5722,7 +5749,7 @@ if ('serviceWorker' in navigator) {
   });
   // Also sync when app regains focus
   window.addEventListener('focus', () => {
-    if (navigator.onLine && OfflineQueue.count() > 0) PWASync.syncAll();
+    if (navigator.onLine && OfflineQueue.count() > 0) PWASync.syncAll(true);
   });
 }
 </script>
