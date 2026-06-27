@@ -749,16 +749,20 @@ const App = {
   /* ── SALE ACTIONS ── */
   addSale(sale) {
     this.state.sales.push(sale);
+    this.state._loaded.sales = true;
+    LocalCache.save('fetchSales', { sales: this.state.sales }); // keep cache in sync
     this.run('addSale', sale).catch(console.error);
   },
   updateSale(sale) {
     const idx = this.state.sales.findIndex(s => s.billNo === sale.billNo);
     if (idx > -1) { sale.latestEditDate = new Date().toISOString(); this.state.sales[idx] = sale; }
+    LocalCache.save('fetchSales', { sales: this.state.sales }); // keep cache in sync
     this.run('updateSale', sale).catch(console.error);
     this.render();
   },
   async deleteSaleConfirmed(billNo) {
     this.state.sales = this.state.sales.filter(s => s.billNo !== billNo);
+    LocalCache.save('fetchSales', { sales: this.state.sales }); // keep cache in sync
     this._int.deleteConfirm = null;
     this.render();
     try { await this.run('deleteSale', billNo); }
@@ -1741,8 +1745,15 @@ Object.assign(App, {
       this.state.pageLoading = true;
       this.render();
       try {
-        if (needsSales) await this.ensureSalesLoaded();
-        if (needsPurchases) await this.ensurePurchasesLoaded();
+        if (needsSales) {
+          // Always reload fresh from server when online so new sales appear immediately
+          if (navigator.onLine) this.state._loaded.sales = false;
+          await this.ensureSalesLoaded();
+        }
+        if (needsPurchases) {
+          if (navigator.onLine) this.state._loaded.purchases = false;
+          await this.ensurePurchasesLoaded();
+        }
       } catch(e) { alert('Load failed: ' + (e.message || e)); }
       this.state.pageLoading = false;
     }
