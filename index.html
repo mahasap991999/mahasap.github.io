@@ -2948,13 +2948,13 @@ Object.assign(App, {
                 autocomplete="off"
                 oninput="App._int.purchaseSupplier=this.value; App._filterSupplierList(this.value)"
                 onfocus="App._filterSupplierList(this.value)"
-                onblur="setTimeout(()=>{ const d=document.getElementById('supplier-dropdown'); if(d) d.style.display='none'; },200)"
+                onblur="setTimeout(()=>{ const d=document.getElementById('supplier-dropdown'); if(d) d.style.display='none'; },350)"
                 class="w-full p-1.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 text-sm">
               <div id="supplier-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);max-height:360px;overflow-y:auto;font-family:inherit">
                 ${this.state.suppliers.map(s=>`
                   <div class="sup-opt" data-name="${s.name.replace(/"/g,'&quot;')}"
                     style="padding:8px 12px;cursor:pointer;font-size:14px;font-family:inherit"
-                    onmousedown="App._selectSupplier(this.dataset.name)"
+                    onmousedown="event.preventDefault(); App._selectSupplier(this.dataset.name)"
                     onmouseover="this.style.background='#f0fdf4'"
                     onmouseout="this.style.background=''">
                     ${s.name}${s.phone?' <span style="color:#6b7280;font-size:12px">('+s.phone+')</span>':''}
