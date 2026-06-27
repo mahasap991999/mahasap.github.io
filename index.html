@@ -1399,14 +1399,146 @@ const App = {
   },
 };
 
-// ─── PWA: Replace google.script.run with fetch() ─────────────
-App.run = function(fn, ...args) {
-  const apiUrl = localStorage.getItem('mahasap_api_url') || GAS_API_URL;
-  if (!apiUrl) {
-    return Promise.reject(new Error('API URL not configured.'));
+// ═══════════════════════════════════════════════════════════════
+// PWA OFFLINE QUEUE SYSTEM
+// Write operations are queued locally when offline,
+// then auto-synced to Google Sheets when back online.
+// ═══════════════════════════════════════════════════════════════
+
+// ── Write functions that can be queued offline ──────────────
+const WRITE_FNS = new Set([
+  'addSale','updateSale','deleteSale',
+  'addOrUpdateProduct','deleteProduct','updateStock',
+  'addOrUpdateCustomer','deleteCustomer',
+  'addOrUpdateExpense','deleteExpense',
+  'addOrUpdateSupplier','deleteSupplier',
+  'saveDiscount','deleteDiscount','incrementDiscountUsage',
+  'addPurchase','updatePurchase','deletePurchase',
+  'addCreditPayment','deleteCreditPayment',
+  'openShift','closeShift',
+  'saveUser','deleteUser',
+  'uploadImage',
+]);
+
+// ── Offline Queue stored in localStorage ────────────────────
+const OfflineQueue = {
+  KEY: 'mahasap_offline_queue',
+  get() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); } catch(e) { return []; }
+  },
+  add(fn, args) {
+    const q = this.get();
+    q.push({ id: Date.now() + Math.random(), fn, args, ts: new Date().toISOString() });
+    localStorage.setItem(this.KEY, JSON.stringify(q));
+    OfflineUI.update();
+  },
+  remove(id) {
+    const q = this.get().filter(x => x.id !== id);
+    localStorage.setItem(this.KEY, JSON.stringify(q));
+    OfflineUI.update();
+  },
+  clear() {
+    localStorage.removeItem(this.KEY);
+    OfflineUI.update();
+  },
+  count() { return this.get().length; }
+};
+
+// ── Local data cache in localStorage ────────────────────────
+const LocalCache = {
+  KEY: 'mahasap_data_cache',
+  save(data) {
+    try { localStorage.setItem(this.KEY, JSON.stringify({ ts: Date.now(), data })); } catch(e) {}
+  },
+  load() {
+    try {
+      const s = localStorage.getItem(this.KEY);
+      return s ? JSON.parse(s) : null;
+    } catch(e) { return null; }
   }
-  // Use text/plain Content-Type to avoid CORS preflight with GAS
-  // GAS only supports GET/POST and doesn't handle OPTIONS preflight
+};
+
+// ── Offline UI banner ────────────────────────────────────────
+const OfflineUI = {
+  _bar: null,
+  init() {
+    const bar = document.createElement('div');
+    bar.id = 'offline-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 12px;font-size:13px;font-weight:600;text-align:center;display:none;transition:all 0.3s;font-family:Noto Sans Lao,sans-serif;';
+    document.body.prepend(bar);
+    this._bar = bar;
+    this.update();
+
+    window.addEventListener('online',  () => { this.update(); PWASync.syncAll(); });
+    window.addEventListener('offline', () => this.update());
+  },
+  update() {
+    if (!this._bar) return;
+    const online = navigator.onLine;
+    const count = OfflineQueue.count();
+    if (!online) {
+      this._bar.style.display = 'block';
+      this._bar.style.background = '#dc2626';
+      this._bar.style.color = '#fff';
+      this._bar.textContent = count > 0
+        ? `📴 ອອບລາຍ — ${count} ລາຍການລໍຖ້າ sync`
+        : '📴 ອອບລາຍ — ຂໍ້ມູນຈະ sync ເມື່ອອອນລາຍ';
+    } else if (count > 0) {
+      this._bar.style.display = 'block';
+      this._bar.style.background = '#f59e0b';
+      this._bar.style.color = '#000';
+      this._bar.textContent = `🔄 ກຳລັງ sync ${count} ລາຍການ...`;
+    } else {
+      this._bar.style.display = 'none';
+    }
+  },
+  showSuccess(count) {
+    if (!this._bar) return;
+    this._bar.style.display = 'block';
+    this._bar.style.background = '#16a34a';
+    this._bar.style.color = '#fff';
+    this._bar.textContent = `✅ Sync ສຳເລັດ ${count} ລາຍການ`;
+    setTimeout(() => { if (this._bar) this._bar.style.display = 'none'; }, 3000);
+  }
+};
+
+// ── Sync engine ──────────────────────────────────────────────
+const PWASync = {
+  _syncing: false,
+  async syncAll() {
+    if (this._syncing || !navigator.onLine) return;
+    const queue = OfflineQueue.get();
+    if (!queue.length) return;
+
+    this._syncing = true;
+    OfflineUI.update();
+    let synced = 0;
+
+    for (const item of queue) {
+      try {
+        await App._callGAS(item.fn, item.args);
+        OfflineQueue.remove(item.id);
+        synced++;
+      } catch(e) {
+        console.warn('[PWA Sync] Failed:', item.fn, e.message);
+        break; // stop on first failure, retry later
+      }
+    }
+
+    this._syncing = false;
+    if (synced > 0) {
+      OfflineUI.showSuccess(synced);
+      // Refresh data from server after sync
+      try { await App.fetchData(); App.render(); } catch(e) {}
+    }
+    OfflineUI.update();
+  }
+};
+
+// ── Core GAS caller (always tries network) ───────────────────
+App._callGAS = function(fn, args) {
+  const apiUrl = localStorage.getItem('mahasap_api_url') || GAS_API_URL;
+  if (!apiUrl) return Promise.reject(new Error('API URL not configured.'));
   return fetch(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
@@ -1419,6 +1551,37 @@ App.run = function(fn, ...args) {
     if (data.error) throw new Error(data.error);
     return data.result;
   });
+};
+
+// ── Main run() — smart online/offline routing ────────────────
+App.run = function(fn, ...args) {
+  // READ functions — try network, fall back to cache
+  if (!WRITE_FNS.has(fn)) {
+    if (!navigator.onLine) {
+      // Return cached data for read operations
+      if (fn === 'fetchCoreData') {
+        const cached = LocalCache.load();
+        if (cached) return Promise.resolve(cached.data);
+      }
+      return Promise.reject(new Error('ອອບລາຍ — ບໍ່ສາມາດໂຫລດຂໍ້ມູນໃໝ່ໄດ້'));
+    }
+    return App._callGAS(fn, args).then(result => {
+      // Cache core data for offline use
+      if (fn === 'fetchCoreData') LocalCache.save(result);
+      return result;
+    });
+  }
+
+  // WRITE functions — queue if offline, execute if online
+  if (!navigator.onLine) {
+    OfflineQueue.add(fn, args);
+    console.log('[PWA] Queued offline:', fn);
+    // Return a fake success so the UI updates normally
+    return Promise.resolve({ queued: true });
+  }
+
+  // Online write — execute immediately
+  return App._callGAS(fn, args);
 };
 </script>
 <script>
@@ -5538,14 +5701,28 @@ window._editSale = function(billNo) {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('app-loading').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
+  // Init offline UI bar
+  OfflineUI.init();
+  // Try to sync any pending queue on load
+  if (navigator.onLine) PWASync.syncAll();
 });
 
 // ─── PWA: Register Service Worker ────────────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/mahasap.github.io/service-worker.js')
-      .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
-      .catch(err => console.warn('[PWA] Service Worker registration failed:', err));
+      .then(reg => {
+        console.log('[PWA] Service Worker registered:', reg.scope);
+        // Listen for sync messages from SW
+        navigator.serviceWorker.addEventListener('message', (e) => {
+          if (e.data && e.data.type === 'SYNC_NOW') PWASync.syncAll();
+        });
+      })
+      .catch(err => console.warn('[PWA] Service Worker failed:', err));
+  });
+  // Also sync when app regains focus
+  window.addEventListener('focus', () => {
+    if (navigator.onLine && OfflineQueue.count() > 0) PWASync.syncAll();
   });
 }
 </script>
