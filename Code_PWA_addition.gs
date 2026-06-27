@@ -22,17 +22,22 @@ function doGet(e) {
  * Returns JSON: the function's return value, or { error: "..." }
  */
 function doPost(e) {
+  const allowedOrigins = [
+    'https://mahasap991999.github.io',
+    'http://localhost',
+    'null' // for local file testing
+  ];
+
+  const origin = e?.parameter?.origin || '';
+
   const output = ContentService.createTextOutput();
   output.setMimeType(ContentService.MimeType.JSON);
 
-  // CORS headers (GAS ignores setHeader for CORS — use a proxy or
-  // deploy with "Anyone" access and same-origin fetch from GAS URL).
   try {
     const body = JSON.parse(e.postData.contents);
     const fn   = body.fn;
     const args = body.args || [];
 
-    // Allowlist of callable functions for security
     const ALLOWED = [
       'login', 'getUsers', 'saveUser', 'deleteUser',
       'fetchCoreData', 'fetchSales', 'fetchPurchases', 'fetchShifts',
@@ -55,8 +60,7 @@ function doPost(e) {
       return output;
     }
 
-    // Dynamically call the function
-    const func = this[fn] || eval(fn); // eval fallback for GAS global scope
+    const func = this[fn];
     if (typeof func !== 'function') {
       output.setContent(JSON.stringify({ error: 'Function not found: ' + fn }));
       return output;
