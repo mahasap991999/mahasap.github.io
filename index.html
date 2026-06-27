@@ -357,9 +357,9 @@ const App = {
     this.state.loading = true;
     this.state._loaded.sales = false;
     this.state._loaded.purchases = false;
+    this.state._loaded.shifts = false;
     document.getElementById('app-loading').classList.remove('hidden');
     document.getElementById('app-root').classList.add('hidden');
-    // document.getElementById('login-screen').style.display = 'none';
     try {
       const data = await this.run('fetchCoreData');
       if (!data) throw new Error('Server returned null. Check Apps Script logs for details.');
@@ -371,12 +371,53 @@ const App = {
       this.state.sales      = [];
       this.state.purchases  = [];
       if (data.error) console.warn('fetchCoreData warning:', data.error);
+      // Save core data to cache for offline use
+      LocalCache.save('fetchCoreData', data);
+
+      // Pre-load cached lazy data into state so offline pages work immediately
+      const cachedSales = LocalCache.load('fetchSales');
+      if (cachedSales && cachedSales.sales) {
+        this.state.sales = cachedSales.sales.filter(s => s && s.billNo && String(s.billNo).trim() !== '');
+        this.state._loaded.sales = true;
+      }
+      const cachedPurchases = LocalCache.load('fetchPurchases');
+      if (cachedPurchases && cachedPurchases.purchases) {
+        this.state.purchases = cachedPurchases.purchases;
+        this.state._loaded.purchases = true;
+      }
+      const cachedShifts = LocalCache.load('fetchShifts');
+      if (cachedShifts && cachedShifts.shifts) {
+        this.state.shifts = cachedShifts.shifts;
+        this.state._loaded.shifts = true;
+      }
+      const cachedCP = LocalCache.load('fetchCreditPayments');
+      if (cachedCP && cachedCP.creditPayments) {
+        this.state.creditPayments = cachedCP.creditPayments;
+      }
     } catch(err) {
       console.error('fetchCoreData failed:', err);
-      alert('⚠️ Failed to load data.\n\nError: ' + (err.message || err) + '\n\nSteps to fix:\n1. Open Apps Script editor\n2. Run setupSheets() once\n3. Push latest code (clasp push)\n4. Reload the app');
-      this.state.products = []; this.state.customers = []; this.state.discounts = [];
-      this.state.expenses = []; this.state.suppliers = [];
-      this.state.sales = []; this.state.purchases = [];
+      // Offline fallback — restore everything from cache silently
+      const core = LocalCache.load('fetchCoreData');
+      if (core) {
+        this.state.products   = core.products   || [];
+        this.state.customers  = core.customers  || [];
+        this.state.discounts  = core.discounts  || [];
+        this.state.expenses   = core.expenses   || [];
+        this.state.suppliers  = core.suppliers  || [];
+        const cachedSales = LocalCache.load('fetchSales');
+        if (cachedSales?.sales) { this.state.sales = cachedSales.sales; this.state._loaded.sales = true; }
+        const cachedPurchases = LocalCache.load('fetchPurchases');
+        if (cachedPurchases?.purchases) { this.state.purchases = cachedPurchases.purchases; this.state._loaded.purchases = true; }
+        const cachedShifts = LocalCache.load('fetchShifts');
+        if (cachedShifts?.shifts) { this.state.shifts = cachedShifts.shifts; this.state._loaded.shifts = true; }
+        const cachedCP = LocalCache.load('fetchCreditPayments');
+        if (cachedCP?.creditPayments) this.state.creditPayments = cachedCP.creditPayments;
+        console.log('[PWA] Loaded all data from local cache (offline mode)');
+      } else {
+        this.state.products = []; this.state.customers = []; this.state.discounts = [];
+        this.state.expenses = []; this.state.suppliers = [];
+        this.state.sales = []; this.state.purchases = [];
+      }
     } finally {
       this.state.loading = false;
       document.getElementById('app-loading').classList.add('hidden');
@@ -387,16 +428,55 @@ const App = {
 
   async ensureSalesLoaded() {
     if (this.state._loaded.sales) return;
-    const res = await this.run('fetchSales');
-    // Automatically filter out any blank entries coming from the spreadsheet rows
-    this.state.sales = (res.sales || []).filter(s => s && s.billNo && String(s.billNo).trim() !== '');
-    this.state._loaded.sales = true;
+    if (!navigator.onLine) {
+      const cached = LocalCache.load('fetchSales');
+      if (cached && cached.sales) {
+        this.state.sales = cached.sales.filter(s => s && s.billNo && String(s.billNo).trim() !== '');
+        this.state._loaded.sales = true;
+        console.log('[PWA] ensureSalesLoaded: offline cache');
+        return;
+      }
+      // No cache — show empty, don't throw
+      this.state.sales = []; this.state._loaded.sales = true; return;
+    }
+    try {
+      const res = await this.run('fetchSales');
+      this.state.sales = (res.sales || []).filter(s => s && s.billNo && String(s.billNo).trim() !== '');
+      this.state._loaded.sales = true;
+      LocalCache.save('fetchSales', { sales: this.state.sales }); // cache for offline
+    } catch(e) {
+      const cached = LocalCache.load('fetchSales');
+      if (cached && cached.sales) {
+        this.state.sales = cached.sales.filter(s => s && s.billNo && String(s.billNo).trim() !== '');
+        this.state._loaded.sales = true;
+        console.log('[PWA] ensureSalesLoaded: error fallback cache');
+      } else { this.state.sales = []; this.state._loaded.sales = true; }
+    }
   },
   async ensurePurchasesLoaded() {
     if (this.state._loaded.purchases) return;
-    const res = await this.run('fetchPurchases');
-    this.state.purchases = res.purchases || [];
-    this.state._loaded.purchases = true;
+    if (!navigator.onLine) {
+      const cached = LocalCache.load('fetchPurchases');
+      if (cached && cached.purchases) {
+        this.state.purchases = cached.purchases;
+        this.state._loaded.purchases = true;
+        console.log('[PWA] ensurePurchasesLoaded: offline cache');
+        return;
+      }
+      this.state.purchases = []; this.state._loaded.purchases = true; return;
+    }
+    try {
+      const res = await this.run('fetchPurchases');
+      this.state.purchases = res.purchases || [];
+      this.state._loaded.purchases = true;
+      LocalCache.save('fetchPurchases', { purchases: this.state.purchases });
+    } catch(e) {
+      const cached = LocalCache.load('fetchPurchases');
+      if (cached && cached.purchases) {
+        this.state.purchases = cached.purchases;
+        this.state._loaded.purchases = true;
+      } else { this.state.purchases = []; this.state._loaded.purchases = true; }
+    }
   },
 
   async refreshProductsFromServer() {
@@ -603,7 +683,14 @@ const App = {
   },
 
   async loadProfitReport() {
-    this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+    if (navigator.onLine) {
+      try {
+        this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+        LocalCache.save('profitReport', this._int.profitReport);
+      } catch(e) { this._int.profitReport = LocalCache.load('profitReport') || null; }
+    } else {
+      this._int.profitReport = LocalCache.load('profitReport') || null;
+    }
     this.render();
   },
 
@@ -1043,14 +1130,37 @@ const App = {
     if (page === 'reports') {
       this.state.pageLoading = true;
       this.render();
-      this.state.reportData = await this.run('getReportData');
-      if (this._int.reportTab === 'profit') {
-        this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+      if (!navigator.onLine) {
+        // Use cached report data offline
+        const cached = LocalCache.load('reportData');
+        if (cached) this.state.reportData = cached;
+        else this.state.reportData = null;
+      } else {
+        try {
+          this.state.reportData = await this.run('getReportData');
+          LocalCache.save('reportData', this.state.reportData);
+          if (this._int.reportTab === 'profit') {
+            this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+            LocalCache.save('profitReport', this._int.profitReport);
+          }
+        } catch(e) {
+          const cached = LocalCache.load('reportData');
+          if (cached) this.state.reportData = cached;
+        }
       }
       this.state.pageLoading = false;
     }
     if (page === 'users' && this.isAdmin()) {
-      this._int.users = await this.run('getUsers');
+      if (navigator.onLine) {
+        try {
+          this._int.users = await this.run('getUsers');
+          LocalCache.save('users', this._int.users);
+        } catch(e) {
+          this._int.users = LocalCache.load('users') || [];
+        }
+      } else {
+        this._int.users = LocalCache.load('users') || [];
+      }
     }
     this.render();
     // Re-attach scanner focus guard and focus after render completes
@@ -1447,15 +1557,33 @@ const OfflineQueue = {
 
 // ── Local data cache in localStorage ────────────────────────
 const LocalCache = {
-  KEY: 'mahasap_data_cache',
-  save(data) {
-    try { localStorage.setItem(this.KEY, JSON.stringify({ ts: Date.now(), data })); } catch(e) {}
+  // Save any key-value data blob
+  save(key, data) {
+    try { localStorage.setItem('mahasap_cache_' + key, JSON.stringify({ ts: Date.now(), data })); } catch(e) {}
   },
-  load() {
+  load(key) {
     try {
-      const s = localStorage.getItem(this.KEY);
-      return s ? JSON.parse(s) : null;
+      const s = localStorage.getItem('mahasap_cache_' + key);
+      return s ? JSON.parse(s).data : null;
     } catch(e) { return null; }
+  },
+  // Convenience: save the whole app state snapshot
+  saveAll(state) {
+    try {
+      this.save('coreData', {
+        products: state.products,
+        customers: state.customers,
+        discounts: state.discounts,
+        expenses: state.expenses,
+        suppliers: state.suppliers,
+      });
+      if (state._loaded.sales)     this.save('sales',     { sales: state.sales });
+      if (state._loaded.purchases) this.save('purchases', { purchases: state.purchases });
+      if (state._loaded.shifts)    this.save('shifts',    { shifts: state.shifts });
+      if (state.creditPayments && state.creditPayments.length)
+        this.save('creditPayments', { creditPayments: state.creditPayments });
+      if (state.reportData)        this.save('reportData', state.reportData);
+    } catch(e) { console.warn('[Cache] saveAll failed:', e); }
   }
 };
 
@@ -1564,16 +1692,17 @@ App.run = function(fn, ...args) {
   // READ functions — try network, fall back to cache
   if (!WRITE_FNS.has(fn)) {
     if (!navigator.onLine) {
-      // Return cached data for read operations
-      if (fn === 'fetchCoreData') {
-        const cached = LocalCache.load();
-        if (cached) return Promise.resolve(cached.data);
+      // Serve from local cache when offline
+      const cached = LocalCache.load(fn);
+      if (cached !== null) {
+        console.log('[PWA] Offline — serving from cache:', fn);
+        return Promise.resolve(cached);
       }
-      return Promise.reject(new Error('ອອບລາຍ — ບໍ່ສາມາດໂຫລດຂໍ້ມູນໃໝ່ໄດ້'));
+      return Promise.reject(new Error('ອອບລາຍ — ບໍ່ມີຂໍ້ມູນ cache ສຳລັບ ' + fn));
     }
     return App._callGAS(fn, args).then(result => {
-      // Cache core data for offline use
-      if (fn === 'fetchCoreData') LocalCache.save(result);
+      // Cache every successful read for offline use
+      LocalCache.save(fn, result);
       return result;
     });
   }
@@ -1621,14 +1750,37 @@ Object.assign(App, {
     if (page === 'reports') {
       this.state.pageLoading = true;
       this.render();
-      this.state.reportData = await this.run('getReportData');
-      if (this._int.reportTab === 'profit') {
-        this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+      if (!navigator.onLine) {
+        // Use cached report data offline
+        const cached = LocalCache.load('reportData');
+        if (cached) this.state.reportData = cached;
+        else this.state.reportData = null;
+      } else {
+        try {
+          this.state.reportData = await this.run('getReportData');
+          LocalCache.save('reportData', this.state.reportData);
+          if (this._int.reportTab === 'profit') {
+            this._int.profitReport = await this.run('getProfitReport', this._int.profitDateFrom || '', this._int.profitDateTo || '');
+            LocalCache.save('profitReport', this._int.profitReport);
+          }
+        } catch(e) {
+          const cached = LocalCache.load('reportData');
+          if (cached) this.state.reportData = cached;
+        }
       }
       this.state.pageLoading = false;
     }
     if (page === 'users' && this.isAdmin()) {
-      this._int.users = await this.run('getUsers');
+      if (navigator.onLine) {
+        try {
+          this._int.users = await this.run('getUsers');
+          LocalCache.save('users', this._int.users);
+        } catch(e) {
+          this._int.users = LocalCache.load('users') || [];
+        }
+      } else {
+        this._int.users = LocalCache.load('users') || [];
+      }
     }
 
     this.render();
@@ -3516,8 +3668,21 @@ Object.assign(App, {
     this.initShiftState();
     this.state.pageLoading = true;
     this.render();
+    if (!navigator.onLine) {
+      // Offline: load everything from cache silently
+      const cachedShifts = LocalCache.load('fetchShifts');
+      if (cachedShifts?.shifts) { this.state.shifts = cachedShifts.shifts; this.state._loaded.shifts = true; }
+      const cachedSales = LocalCache.load('fetchSales');
+      if (cachedSales?.sales) { this.state.sales = cachedSales.sales; this.state._loaded.sales = true; }
+      const cachedCP = LocalCache.load('fetchCreditPayments');
+      if (cachedCP?.creditPayments) this.state.creditPayments = cachedCP.creditPayments;
+      this.state.activeShift = this.state.shifts.find(
+        s => s.status === 'open' && s.cashier === (this.state.currentUser?.name || '')
+      ) || null;
+      this.state.pageLoading = false;
+      return;
+    }
     try {
-      // Fetch shifts AND refresh expenses, sales, creditPayments in parallel so computeShiftSummary has fresh data
       const [res, coreData, salesRes, cpRes] = await Promise.all([
         this.run('fetchShifts'),
         this.run('fetchCoreData'),
@@ -3528,13 +3693,18 @@ Object.assign(App, {
       this.state.activeShift = this.state.shifts.find(
         s => s.status === 'open' && s.cashier === (this.state.currentUser?.name || '')
       ) || null;
-      // Refresh expenses, sales, creditPayments so shift summary is accurate
-      if (coreData?.expenses)        this.state.expenses        = coreData.expenses;
-      if (salesRes?.sales)           { this.state.sales = salesRes.sales; this.state._loaded.sales = true; }
-      if (cpRes?.creditPayments)     this.state.creditPayments  = cpRes.creditPayments;
+      if (coreData?.expenses)    this.state.expenses       = coreData.expenses;
+      if (salesRes?.sales)       { this.state.sales = salesRes.sales; this.state._loaded.sales = true; }
+      if (cpRes?.creditPayments) this.state.creditPayments = cpRes.creditPayments;
       this.state._loaded.shifts = true;
+      // Cache for offline
+      LocalCache.save('fetchShifts', { shifts: this.state.shifts });
+      LocalCache.save('fetchSales',  { sales: this.state.sales });
+      LocalCache.save('fetchCreditPayments', { creditPayments: this.state.creditPayments });
     } catch(e) {
-      alert('Failed to load shifts: ' + e.message);
+      console.warn('loadShiftData failed:', e.message);
+      const cachedShifts = LocalCache.load('fetchShifts');
+      if (cachedShifts?.shifts) { this.state.shifts = cachedShifts.shifts; this.state._loaded.shifts = true; }
     }
     this.state.pageLoading = false;
     this.render();
